@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Run Noul, Choice, and Score requests against TypeSafe's Jev model and read the probabilities it returns."
+    />
+    <meta name="color-scheme" content="dark light" />
+    <title>Jev 3000</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&family=Instrument+Serif:ital@1&family=JetBrains+Mono:wght@400&display=swap"
+    />
+  </head>
+  <body>
+    <header class="masthead">
+      <h1 class="wordmark">Jev 3000</h1>
+      <p class="masthead-summary">Three ways to ask Jev a question about the same films.</p>
+    </header>
+
+    <main class="bench">
+      <section class="panel" aria-labelledby="noul-title">
+        <h2 id="noul-title" class="panel-name">Noul</h2>
+        <p class="panel-description">
+          The probability that a yes/no statement about the state is true.
+        </p>
+        <form class="panel-form" data-primitive="noul" novalidate>
+          <div class="view-switch" role="group" aria-label="Edit the Noul request as">
+            <button class="view-option" type="button" data-view="tree" aria-pressed="true">
+              Tree
+            </button>
+            <button class="view-option" type="button" data-view="json" aria-pressed="false">
+              JSON
+            </button>
+          </div>
+          <div class="tree-view" data-view-body="tree"></div>
+          <div class="json-view" data-view-body="json" hidden>
+            <label class="visually-hidden" for="noul-request">Noul request as JSON</label>
+            <textarea
+              id="noul-request"
+              class="request-field"
+              name="request"
+              rows="14"
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              aria-describedby="noul-hint"
+            ></textarea>
+            <p id="noul-error" class="field-error" hidden></p>
+            <p id="noul-hint" class="hint">
+              JSON. Questions without their own criteria use the request's criteria.
+            </p>
+          </div>
+          <p id="noul-status" class="panel-status" role="status"></p>
+          <button class="run" type="submit">
+            <span class="run-label">Run</span>
+            <span class="run-sizer" aria-hidden="true">Running</span>
+          </button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="choice-title">
+        <h2 id="choice-title" class="panel-name">Choice</h2>
+        <p class="panel-description">
+          One option from a fixed set, with a probability for every option.
+        </p>
+        <form class="panel-form" data-primitive="choice" novalidate>
+          <div class="view-switch" role="group" aria-label="Edit the Choice request as">
+            <button class="view-option" type="button" data-view="tree" aria-pressed="true">
+              Tree
+            </button>
+            <button class="view-option" type="button" data-view="json" aria-pressed="false">
+              JSON
+            </button>
+          </div>
+          <div class="tree-view" data-view-body="tree"></div>
+          <div class="json-view" data-view-body="json" hidden>
+            <label class="visually-hidden" for="choice-request">Choice request as JSON</label>
+            <textarea
+              id="choice-request"
+              class="request-field"
+              name="request"
+              rows="14"
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              aria-describedby="choice-hint"
+            ></textarea>
+            <p id="choice-error" class="field-error" hidden></p>
+            <p id="choice-hint" class="hint">
+              JSON. Questions without their own criteria use the request's criteria.
+            </p>
+          </div>
+          <p id="choice-status" class="panel-status" role="status"></p>
+          <button class="run" type="submit">
+            <span class="run-label">Run</span>
+            <span class="run-sizer" aria-hidden="true">Running</span>
+          </button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="score-title">
+        <h2 id="score-title" class="panel-name">Score</h2>
+        <p class="panel-description">
+          A position on ordered levels you describe, with a probability for each level.
+        </p>
+        <form class="panel-form" data-primitive="score" novalidate>
+          <div class="view-switch" role="group" aria-label="Edit the Score request as">
+            <button class="view-option" type="button" data-view="tree" aria-pressed="true">
+              Tree
+            </button>
+            <button class="view-option" type="button" data-view="json" aria-pressed="false">
+              JSON
+            </button>
+          </div>
+          <div class="tree-view" data-view-body="tree"></div>
+          <div class="json-view" data-view-body="json" hidden>
+            <label class="visually-hidden" for="score-request">Score request as JSON</label>
+            <textarea
+              id="score-request"
+              class="request-field"
+              name="request"
+              rows="14"
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              aria-describedby="score-hint"
+            ></textarea>
+            <p id="score-error" class="field-error" hidden></p>
+            <p id="score-hint" class="hint">
+              JSON. Questions without their own criteria use the request's criteria.
+            </p>
+          </div>
+          <p id="score-status" class="panel-status" role="status"></p>
+          <button class="run" type="submit">
+            <span class="run-label">Run</span>
+            <span class="run-sizer" aria-hidden="true">Running</span>
+          </button>
+        </form>
+      </section>
+
+      <section class="readout" aria-labelledby="readout-title">
+        <h2 id="readout-title" class="visually-hidden">Readout</h2>
+        <form class="warm" novalidate>
+          <label class="warm-field-label" for="keep-alive">Keep warm for</label>
+          <select
+            id="keep-alive"
+            class="tree-field tree-select warm-keep-alive"
+            name="keepAliveSeconds"
+          >
+            <option value="4" selected>4 s, Node default</option>
+            <option value="30">30 s</option>
+            <option value="60">60 s</option>
+          </select>
+          <button class="run run-compact warm-button" type="submit">
+            <span class="run-label warm-label">Warm connection</span>
+            <span class="run-sizer" aria-hidden="true">Warm connection</span>
+          </button>
+          <output id="warm-status" class="warm-status" for="keep-alive"></output>
+        </form>
+        <div id="readout-body" class="readout-body" aria-live="polite">
+          <p class="readout-status">Run a panel to see Jev's answer.</p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

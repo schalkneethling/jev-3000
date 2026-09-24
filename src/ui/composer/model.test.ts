@@ -1,0 +1,384 @@
+import { describe, expect, it } from "vite-plus/test";
+import type { JevRequest } from "../../jev/contract.ts";
+import { choiceExample, examples, noulExample, scoreExample } from "../../jev/examples.ts";
+import { validateJevRequest } from "../../jev/validate.ts";
+import type { ValidJevRequest } from "../../jev/validate.ts";
+import {
+  addLevel,
+  addOption,
+  addQuestion,
+  arrayKeys,
+  expandTemplate,
+  findIssues,
+  inheritCriteria,
+  moveByKey,
+  overrideCriteria,
+  readContentText,
+  readStateText,
+  removeByKey,
+  removeSharedCriteria,
+  supportsFanOut,
+  toRequest,
+  toViewModel,
+} from "./model.ts";
+import type { ComposerModel, CriteriaModel, QuestionModel } from "./model.ts";
+
+function question(model: ComposerModel, index = 0): QuestionModel {
+  const found = model.questions[index];
+  if (found === undefined) throw new Error(`No question at ${index}.`);
+  return found;
+}
+
+function options(criteria: CriteriaModel | undefined) {
+  if (criteria?.kind !== "choice") throw new Error("Expected choice criteria.");
+  return criteria;
+}
+
+function levels(criteria: CriteriaModel | undefined) {
+  if (criteria?.kind !== "score") throw new Error("Expected score criteria.");
+  return criteria;
+}
+
+function messages(model: ComposerModel): string[] {
+  return findIssues(model).map((issue) => issue.message);
+}
+
+describe("round trip", () => {
+  it.each(Object.entries(examples))(
+    "turns the %s example into a view-model and back unchanged",
+    (_name, example) => {
+      const request = toRequest(toViewModel(example));
+      expect(request).toStrictEqual(example);
+      expect(JSON.stringify(request)).toBe(JSON.stringify(example));
+    },
+  );
+
+  it.each(Object.entries(examples))(
+    "produces a request that passes validation for %s",
+    (_name, example) => {
+      expect(validateJevRequest(toRequest(toViewModel(example))).ok).toBe(true);
+    },
+  );
+
+  it.each(Object.entries(examples))("finds no issues in the %s example", (_name, example) => {
+    expect(findIssues(toViewModel(example))).toEqual([]);
+  });
+
+  it("gives every row a unique key", () => {
+    const model = toViewModel(choiceExample);
+    const keys = [
+      ...model.questions.map((entry) => entry.key),
+      ...options(model.criteria).options.map((option) => option.key),
+    ];
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe("fan-out", () => {
+  it("collapses the six Choice film questions into one question over films", () => {
+    const model = toViewModel(choiceExample);
+    expect(model.questions).toHaveLength(1);
+    expect(question(model)).toMatchObject({
+      id: "film",
+      fanOut: "films",
+      instructions: "Which genre best fits the film described in {{item}}?",
+    });
+  });
+
+  it("collapses the Score questions and keeps the path below the item", () => {
+    const model = toViewModel(scoreExample);
+    expect(model.questions).toHaveLength(1);
+    expect(question(model)).toMatchObject({
+      id: "film",
+      fanOut: "films",
+      instructions: "How intense is the content described in {{item.notes}} for a young audience?",
+    });
+  });
+
+  it("leaves unrelated Noul questions as plain questions", () => {
+    const model = toViewModel(noulExample);
+    expect(model.questions.map((entry) => entry.id)).toEqual(Object.keys(noulExample.questions));
+    expect(model.questions.every((entry) => entry.fanOut === undefined)).toBe(true);
+  });
+
+  it("expands a template into backticked paths", () => {
+    expect(expandTemplate("Is {{item}} longer than {{item.notes}}?", "films", 3)).toBe(
+      "Is `films[3]` longer than `films[3].notes`?",
+    );
+  });
+
+  it("expands to one question per item, following the current state", () => {
+    const model = toViewModel(choiceExample);
+    model.state = { films: ["a", "b"] };
+    expect(Object.keys(toRequest(model).questions)).toEqual(["film_0", "film_1"]);
+    expect(toRequest(model).questions.film_1?.instructions).toBe(
+      "Which genre best fits the film described in `films[1]`?",
+    );
+  });
+
+  it("keeps questions plain when one instruction differs beyond the index", () => {
+    const request: ValidJevRequest = {
+      ...choiceExample,
+      questions: {
+        ...choiceExample.questions,
+        film_2: { instructions: "Which genre fits `films[2]` best?" },
+      },
+    };
+    const model = toViewModel(request);
+    expect(model.questions).toHaveLength(6);
+    expect(toRequest(model)).toStrictEqual(request);
+  });
+
+  it("keeps questions plain when the count does not match the list length", () => {
+    const { film_5: _dropped, ...fewer } = choiceExample.questions;
+    const request: ValidJevRequest = { ...choiceExample, questions: fewer };
+    const model = toViewModel(request);
+    expect(model.questions).toHaveLength(5);
+    expect(toRequest(model)).toStrictEqual(request);
+  });
+
+  it("keeps questions plain when their criteria differ", () => {
+    const request: JevRequest<"score"> = {
+      ...scoreExample,
+      questions: {
+        ...scoreExample.questions,
+        film_1: { ...scoreExample.questions.film_1!, criteria: ["Calm", "Tense"] },
+      },
+    };
+    const model = toViewModel(request);
+    expect(model.questions).toHaveLength(4);
+    expect(toRequest(model)).toStrictEqual(request);
+  });
+
+  it("collapses questions that share their own criteria and keeps those criteria", () => {
+    const criteria: [string, string] = ["Calm", "Tense"];
+    const request: JevRequest<"score"> = {
+      primitive: "score",
+      state: { films: ["a", "b"] },
+      questions: {
+        film_0: { instructions: "How tense is `films[0]`?", criteria },
+        film_1: { instructions: "How tense is `films[1]`?", criteria },
+      },
+    };
+    const model = toViewModel(request);
+    expect(model.questions).toHaveLength(1);
+    expect(levels(question(model).criteria).levels).toHaveLength(2);
+    expect(toRequest(model)).toStrictEqual(request);
+  });
+
+  it("reports a missing list, an empty list, and a missing placeholder", () => {
+    const model = toViewModel(choiceExample);
+    const fanOut = question(model);
+
+    fanOut.fanOut = "reviews";
+    expect(messages(model)).toEqual([
+      `The state has no list called "reviews". Pick a list from the state or ask once.`,
+    ]);
+
+    model.state = { films: [] };
+    fanOut.fanOut = "films";
+    expect(messages(model)[0]).toMatch(/is empty/);
+
+    model.state = { films: ["a"] };
+    fanOut.instructions = "Which genre is it?";
+    expect(messages(model)).toEqual(["Write {{item}} in the instructions where each item goes."]);
+  });
+});
+
+describe("question ids", () => {
+  it("rejects empty and non-slug ids", () => {
+    const model = toViewModel(noulExample);
+    question(model, 0).id = "";
+    question(model, 1).id = "Reveals Ending";
+    expect(messages(model)).toEqual([
+      "Give this question an id.",
+      "Question ids use lowercase letters, digits, and underscores only.",
+    ]);
+  });
+
+  it("flags every question that shares an id", () => {
+    const model = toViewModel(noulExample);
+    question(model, 1).id = "recommends";
+    const issues = findIssues(model);
+    expect(issues.map((issue) => issue.key)).toEqual([
+      question(model, 0).key,
+      question(model, 1).key,
+    ]);
+    expect(issues.every((issue) => issue.field === "id")).toBe(true);
+  });
+
+  it("flags a plain id that clashes with a fan-out's expanded ids", () => {
+    const model = toViewModel(choiceExample);
+    const plain = addQuestion(model);
+    plain.id = "film_2";
+    plain.instructions = "Is this a film?";
+    expect(findIssues(model).map((issue) => issue.key)).toEqual([question(model).key, plain.key]);
+  });
+
+  it("gives an added question an unused id", () => {
+    const model = toViewModel(noulExample);
+    question(model, 0).id = "question_5";
+    expect(addQuestion(model).id).toBe("question_6");
+  });
+});
+
+describe("options and levels", () => {
+  it("rejects option names that are empty, not slugs, or repeated", () => {
+    const model = toViewModel(choiceExample);
+    const shared = options(model.criteria);
+    addOption(model, shared);
+    addOption(model, shared).name = "Film Noir";
+    addOption(model, shared).name = "horror";
+    expect(messages(model)).toEqual([
+      "Give this option a name.",
+      "Option names use lowercase letters, digits, and underscores only.",
+      `Another option is already called "horror". Give this one a different name.`,
+    ]);
+  });
+
+  it("needs at least two options and two levels", () => {
+    const choice = toViewModel(choiceExample);
+    options(choice.criteria).options.splice(1);
+    expect(messages(choice)).toEqual(["Shared options need at least two options. Add one more."]);
+
+    const score = toViewModel(scoreExample);
+    levels(score.criteria).levels.splice(0);
+    expect(messages(score)).toEqual(["Shared levels need at least two levels. Add two."]);
+  });
+
+  it("moves and removes levels by key", () => {
+    const model = toViewModel(scoreExample);
+    const shared = levels(model.criteria);
+    const [first, second] = shared.levels;
+    expect(moveByKey(shared.levels, first!.key, 1)).toBe(1);
+    expect(shared.levels[0]).toBe(second);
+    expect(moveByKey(shared.levels, second!.key, -1)).toBe(-1);
+    expect(removeByKey(shared.levels, first!.key)).toBe(1);
+    expect(shared.levels).toHaveLength(3);
+    addLevel(model, shared);
+    expect(toRequest(model).criteria).toHaveLength(4);
+  });
+});
+
+describe("state and instructions", () => {
+  it("empty instructions and an empty state are issues", () => {
+    const model = toViewModel(noulExample);
+    model.state = "  ";
+    question(model, 2).instructions = "";
+    expect(findIssues(model).map((issue) => issue.field)).toEqual(["state", "instructions"]);
+  });
+
+  it("reads state as JSON when it is an object or a list, otherwise as text", () => {
+    expect(readStateText(`{"films": [1, 2]}`)).toEqual({
+      state: { films: [1, 2] },
+      reading: "json",
+    });
+    expect(readStateText(`[1, 2]`).reading).toBe("json");
+    expect(readStateText(`{"films": `)).toEqual({ state: `{"films": `, reading: "text" });
+    expect(readStateText("42").reading).toBe("text");
+  });
+
+  it("detects top-level list keys usable as fan-out paths", () => {
+    expect(arrayKeys({ films: [], title: "x", "bad key": [], reviews: [1] })).toEqual([
+      "films",
+      "reviews",
+    ]);
+    expect(arrayKeys(["a"])).toEqual([]);
+    expect(arrayKeys("text")).toEqual([]);
+  });
+
+  it("reads content as JSON whenever it parses as an object or list", () => {
+    expect(readContentText(`{"a": 1}`)).toEqual({ a: 1 });
+    expect(readContentText(`[1, 2]`)).toEqual([1, 2]);
+    expect(readContentText(`{"a": `)).toBe(`{"a": `);
+    expect(readContentText("Is it good?")).toBe("Is it good?");
+  });
+
+  it("becomes structured again after an edit breaks and then repairs the JSON", () => {
+    const model = toViewModel({
+      ...noulExample,
+      questions: { structured: { instructions: { a: 1 } } },
+    });
+    const edited = question(model);
+    edited.instructions = readContentText(`{\n  "a": 1\n`);
+    expect(edited.instructions).toBe(`{\n  "a": 1\n`);
+    edited.instructions = readContentText(`{\n  "a": 1\n}`);
+    expect(edited.instructions).toEqual({ a: 1 });
+    expect(toRequest(model).questions.structured?.instructions).toEqual({ a: 1 });
+  });
+});
+
+describe("inherit or override criteria", () => {
+  it("inherits shared criteria by default and sends no criteria of its own", () => {
+    const model = toViewModel(choiceExample);
+    expect(question(model).criteria).toBeUndefined();
+    expect(toRequest(model).questions.film_0).not.toHaveProperty("criteria");
+  });
+
+  it("overrides with a copy of the shared criteria that edits independently", () => {
+    const model = toViewModel(choiceExample);
+    const own = options(overrideCriteria(model, question(model)));
+    const shared = options(model.criteria);
+    expect(own.options.map((option) => option.name)).toEqual(
+      shared.options.map((option) => option.name),
+    );
+    expect(own.options[0]!.key).not.toBe(shared.options[0]!.key);
+
+    own.options[0]!.name = "sci_fi";
+    expect(shared.options[0]!.name).toBe("science_fiction");
+    expect(Object.keys(toRequest(model).questions.film_0?.criteria ?? {})[0]).toBe("sci_fi");
+  });
+
+  it("inherits again after the override is dropped", () => {
+    const model = toViewModel(scoreExample);
+    overrideCriteria(model, question(model));
+    inheritCriteria(question(model));
+    expect(toRequest(model)).toStrictEqual(scoreExample);
+  });
+
+  it("starts a Noul override with no meanings when there is nothing shared", () => {
+    const model = toViewModel(noulExample);
+    expect(overrideCriteria(model, question(model))).toEqual({ kind: "noul", meanings: {} });
+  });
+
+  it("copies shared criteria into inheriting questions when shared criteria are removed", () => {
+    const model = toViewModel(scoreExample);
+    removeSharedCriteria(model);
+    const request = toRequest(model);
+    expect(request).not.toHaveProperty("criteria");
+    expect(request.questions.film_0?.criteria).toEqual(scoreExample.criteria);
+    expect(validateJevRequest(request).ok).toBe(true);
+  });
+
+  it("reports a Choice question with no options anywhere", () => {
+    const model = toViewModel(choiceExample);
+    delete model.criteria;
+    expect(messages(model)).toEqual([
+      "This question has no options. Add options for it, or add shared options.",
+    ]);
+  });
+});
+
+describe("fan-out by primitive", () => {
+  it("is offered for choice and score but not noul", () => {
+    expect(supportsFanOut("noul")).toBe(false);
+    expect(supportsFanOut("choice")).toBe(true);
+    expect(supportsFanOut("score")).toBe(true);
+  });
+
+  it("never collapses noul questions, even when they look like a fan-out", () => {
+    const request = validateJevRequest({
+      primitive: "noul",
+      state: { reviews: ["Loved it.", "Hated it."] },
+      questions: {
+        positive_0: { instructions: "Is `reviews[0]` positive?" },
+        positive_1: { instructions: "Is `reviews[1]` positive?" },
+      },
+    });
+    if (!request.ok) throw new Error(request.error);
+    const model = toViewModel(request.value);
+    expect(model.questions.map((entry) => entry.id)).toEqual(["positive_0", "positive_1"]);
+    expect(model.questions.every((entry) => entry.fanOut === undefined)).toBe(true);
+    expect(toRequest(model)).toEqual(request.value);
+  });
+});
